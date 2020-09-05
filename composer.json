@@ -37,7 +37,7 @@
     "symfony/dependency-injection": "^3.4 || ^4.0",
     "symfony/framework-bundle": "^3.4 || >=4.0 < 4.1",
     "symfony/http-kernel": "^3.4 || ^4.0",
-    "symfony/messenger": "3.4.x-dev"
+    "eliberty/symfony-messenger": "3.4.x-dev"
   },
   "require-dev": {
     "behat/behat": "^3.5",
