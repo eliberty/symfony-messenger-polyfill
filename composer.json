@@ -1,7 +1,7 @@
 {
-  "name": "lendable/symfony-messenger-polyfill",
+  "name": "eliberty/symfony-messenger-polyfill",
   "type": "symfony-bundle",
-  "description": "Use Symfony Messenger v4.2 with older Symfony versions.",
+  "description": "Use Symfony Messenger v4.4 with older Symfony versions.",
   "keywords": ["lendable", "symfony3", "symfony4", "bundle", "messenger", "symfony-messenger", "polyfill"],
   "minimum-stability": "stable",
   "license": "MIT",
@@ -10,6 +10,10 @@
     {
       "name": "Lendable Ltd",
       "email": "dev@lendable.co.uk"
+    },
+    {
+      "name": "Eliberty",
+      "email": "dev@eliberty.fr"
     }
   ],
   
@@ -33,7 +37,7 @@
     "symfony/dependency-injection": "^3.4 || ^4.0",
     "symfony/framework-bundle": "^3.4 || >=4.0 < 4.1",
     "symfony/http-kernel": "^3.4 || ^4.0",
-    "symfony/messenger": "~4.2.0"
+    "symfony/messenger": "3.4.x-dev"
   },
   "require-dev": {
     "behat/behat": "^3.5",

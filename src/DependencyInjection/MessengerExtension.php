@@ -24,7 +24,7 @@ final class MessengerExtension extends ConfigurableExtension
 {
     protected function loadInternal(array $config, ContainerBuilder $container): void
     {
-        $loader = new XmlFileLoader($container, new FileLocator(\dirname(__DIR__).'/Resources/config'));
+        $loader = new XmlFileLoader($container, new FileLocator(\dirname(__DIR__) . '/Resources/config'));
 
         $loader->load('messenger.xml');
 
@@ -88,7 +88,7 @@ final class MessengerExtension extends ConfigurableExtension
                 \array_unshift($middleware, ['id' => 'traceable', 'arguments' => [$busId]]);
             }
 
-            $container->setParameter($busId.'.middleware', $middleware);
+            $container->setParameter($busId . '.middleware', $middleware);
             $container->register($busId, MessageBus::class)->addArgument([])->addTag('messenger.bus');
 
             if ($busId === $config['default_bus']) {
@@ -109,7 +109,7 @@ final class MessengerExtension extends ConfigurableExtension
                 ->setFactory([new Reference('messenger.transport_factory'), 'createTransport'])
                 ->setArguments([$transport['dsn'], $transport['options']])
                 ->addTag('messenger.receiver', ['alias' => $name]);
-            $container->setDefinition($transportId = 'messenger.transport.'.$name, $transportDefinition);
+            $container->setDefinition($transportId = 'messenger.transport.' . $name, $transportDefinition);
             $senderAliases[$name] = $transportId;
         }
 
@@ -124,7 +124,7 @@ final class MessengerExtension extends ConfigurableExtension
                 $senders[$sender] = new Reference($senderAliases[$sender] ?? $sender);
             }
 
-            $sendersId = 'messenger.senders.'.$message;
+            $sendersId = 'messenger.senders.' . $message;
             $container->register($sendersId, RewindableGenerator::class)
                 ->setFactory('current')
                 ->addArgument([new IteratorArgument($senders)]);
@@ -140,6 +140,6 @@ final class MessengerExtension extends ConfigurableExtension
 
     public function getAlias(): string
     {
-        return 'lendable_polyfill_messenger';
+        return 'redpill_polyfill_messenger';
     }
 }
