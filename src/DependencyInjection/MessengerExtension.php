@@ -61,6 +61,10 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
 
         $frameworkConfigs = $container->getExtensionConfig('framework');
         $this->registerMessengerExtension($config, $container, $this->validationConfig);
+<<<<<<< HEAD
+=======
+        $this->loadMessengerServices($container);
+>>>>>>> bd72f52330dd00b92458ca5d4a23581c80858c16
     }
 
     private function registerMessengerExtension(array $config, ContainerBuilder $container, $validationConfig): void
@@ -232,6 +236,32 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             $container->removeDefinition('console.command.messenger_failed_messages_show');
             $container->removeDefinition('console.command.messenger_failed_messages_remove');
         }
+    }
+
+    private function loadMessengerServices(ContainerBuilder $container) : void
+    {
+
+        if (! class_exists(DoctrineClearEntityManagerWorkerSubscriber::class)) {
+            $container->removeDefinition('doctrine.orm.messenger.event_subscriber.doctrine_clear_entity_manager');
+        }
+
+        // available in Symfony 5.1 and higher
+        if (! class_exists(MessengerTransportDoctrineSchemaSubscriber::class)) {
+            $container->removeDefinition('doctrine.orm.messenger.doctrine_schema_subscriber');
+        }
+
+        $transportFactoryDefinition = $container->getDefinition('messenger.transport.doctrine.factory');
+        if (! class_exists(DoctrineTransportFactory::class)) {
+            // If symfony/messenger < 5.1
+            if (! class_exists(\Symfony\Component\Messenger\Transport\Doctrine\DoctrineTransportFactory::class)) {
+                // Dont add the tag
+                return;
+            }
+
+            $transportFactoryDefinition->setClass(\Symfony\Component\Messenger\Transport\Doctrine\DoctrineTransportFactory::class);
+        }
+
+        $transportFactoryDefinition->addTag('messenger.transport_factory');
     }
 
     public function getAlias(): string
