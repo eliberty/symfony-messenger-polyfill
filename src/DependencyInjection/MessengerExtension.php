@@ -26,6 +26,7 @@ use Symfony\Component\Stopwatch\Stopwatch;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransportFactory;
 use Symfony\Component\Messenger\Bridge\Redis\Transport\RedisTransportFactory;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\DoctrineTransportFactory;
+use Symfony\Component\Messenger\Bridge\AmazonSqs\Transport\AmazonSqsTransportFactory;
 
 
 final class MessengerExtension extends ConfigurableExtension implements PrependExtensionInterface
@@ -40,7 +41,6 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
                 $this->validationConfig = $config['validation'];
             }
         }
-
     }
 
     protected function loadInternal(array $config, ContainerBuilder $container): void
@@ -63,104 +63,6 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
         $this->registerMessengerExtension($config, $container, $this->validationConfig);
     }
 
-    private function OldregisterMessengerConfiguration(array $config, ContainerBuilder $container): void
-    {
-        if (empty($config['transports'])) {
-            $container->removeDefinition('messenger.transport.symfony_serializer');
-            $container->removeDefinition('messenger.transport.amqp.factory');
-        } else {
-            if ($config['serializer']['enabled'] && ('messenger.transport.symfony_serializer' === $config['serializer']['id'] || null === $config['serializer']['id'])) {
-                $container->getDefinition('messenger.transport.symfony_serializer')
-                    ->replaceArgument(1, $config['serializer']['format'])
-                    ->replaceArgument(2, $config['serializer']['context']);
-                $container->setAlias('messenger.transport.serializer', 'messenger.transport.symfony_serializer');
-            } elseif (null !== $config['serializer']['id']) {
-                $container->setAlias('messenger.transport.serializer', $config['serializer']['id']);
-            } else {
-                $container->removeDefinition('messenger.transport.amqp.factory');
-            }
-        }
-
-        if (null === $config['default_bus'] && 1 === \count($config['buses'])) {
-            $config['default_bus'] = \key($config['buses']);
-        }
-
-        $defaultMiddleware = [
-            'before' => [],
-            'after' => [['id' => 'send_message'], ['id' => 'handle_message']],
-        ];
-        foreach ($config['buses'] as $busId => $bus) {
-            $middleware = $bus['middleware'];
-
-            if ($bus['default_middleware']) {
-                if ('allow_no_handlers' === $bus['default_middleware']) {
-                    $defaultMiddleware['after'][1]['arguments'] = [true];
-                } else {
-                    unset($defaultMiddleware['after'][1]['arguments']);
-                }
-                $middleware = \array_merge($defaultMiddleware['before'], $middleware, $defaultMiddleware['after']);
-            }
-
-            foreach ($middleware as $middlewareItem) {
-                if (!($config['validation']['enabled'] ?? false) && \in_array($middlewareItem['id'], ['validation', 'messenger.middleware.validation'], true)) {
-                    throw new \LogicException('The Validation middleware is only available when the Validator component is installed and enabled. Try running "composer require symfony/validator".');
-                }
-            }
-
-            if ($container->getParameter('kernel.debug') && \class_exists(Stopwatch::class)) {
-                \array_unshift($middleware, ['id' => 'traceable', 'arguments' => [$busId]]);
-            }
-
-            $container->setParameter($busId . '.middleware', $middleware);
-            $container->register($busId, MessageBus::class)->addArgument([])->addTag('messenger.bus');
-
-            if ($busId === $config['default_bus']) {
-                $container->setAlias('message_bus', $busId)->setPublic(true);
-                $container->setAlias(MessageBusInterface::class, $busId);
-            } else {
-                $this->registerAliasForArgument($container, $busId, MessageBusInterface::class);
-            }
-        }
-
-        $senderAliases = [];
-        foreach ($config['transports'] as $name => $transport) {
-            if (0 === \strpos($transport['dsn'], 'amqp://') && !$container->hasDefinition('messenger.transport.amqp.factory')) {
-                throw new \LogicException('The default AMQP transport is not available. Make sure you have installed and enabled the Serializer component. Try enabling it or running "composer require symfony/serializer-pack".');
-            }
-
-            $transportDefinition = (new Definition(TransportInterface::class))
-                ->setFactory([new Reference('messenger.transport_factory'), 'createTransport'])
-                ->setArguments([$transport['dsn'], $transport['options']])
-                ->addTag('messenger.receiver', ['alias' => $name]);
-            $container->setDefinition($transportId = 'messenger.transport.' . $name, $transportDefinition);
-            $senderAliases[$name] = $transportId;
-        }
-
-        $messageToSendersMapping = [];
-        $messagesToSendAndHandle = [];
-        foreach ($config['routing'] as $message => $messageConfiguration) {
-            if ('*' !== $message && !\class_exists($message) && !\interface_exists($message, false)) {
-                throw new \LogicException(\sprintf('Invalid Messenger routing configuration: class or interface "%s" not found.', $message));
-            }
-            $senders = [];
-            foreach ($messageConfiguration['senders'] as $sender) {
-                $senders[$sender] = new Reference($senderAliases[$sender] ?? $sender);
-            }
-
-            $sendersId = 'messenger.senders.' . $message;
-            $container->register($sendersId, RewindableGenerator::class)
-                ->setFactory('current')
-                ->addArgument([new IteratorArgument($senders)]);
-            $messageToSendersMapping[$message] = new Reference($sendersId);
-
-            $messagesToSendAndHandle[$message] = $messageConfiguration['send_and_handle'];
-        }
-
-        $container->getDefinition('messenger.senders_locator')
-            ->replaceArgument(0, $messageToSendersMapping)
-            ->replaceArgument(1, $messagesToSendAndHandle);
-    }
-
     private function registerMessengerExtension(array $config, ContainerBuilder $container, $validationConfig): void
     {
         if (!interface_exists(MessageBusInterface::class)) {
@@ -173,6 +75,10 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
 
         if (class_exists(RedisTransportFactory::class)) {
             $container->getDefinition('messenger.transport.redis.factory')->addTag('messenger.transport_factory');
+        }
+
+        if (class_exists(AmazonSqsTransportFactory::class)) {
+            $container->getDefinition('messenger.transport.sqs.factory')->addTag('messenger.transport_factory');
         }
 
         if (null === $config['default_bus'] && 1 === \count($config['buses'])) {
@@ -217,7 +123,7 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
                 array_unshift($middleware, ['id' => 'traceable', 'arguments' => [$busId]]);
             }
 
-            $container->setParameter($busId.'.middleware', $middleware);
+            $container->setParameter($busId . '.middleware', $middleware);
             $container->register($busId, MessageBus::class)->addArgument([])->addTag('messenger.bus');
 
             if ($busId === $config['default_bus']) {
@@ -233,10 +139,11 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             $container->removeDefinition('messenger.transport.symfony_serializer');
             $container->removeDefinition('messenger.transport.amqp.factory');
             $container->removeDefinition('messenger.transport.redis.factory');
+            $container->removeDefinition('messenger.transport.sqs.factory');
         } else {
             $container->getDefinition('messenger.transport.symfony_serializer')
-                      ->replaceArgument(1, $config['serializer']['symfony_serializer']['format'])
-                      ->replaceArgument(2, $config['serializer']['symfony_serializer']['context']);
+                ->replaceArgument(1, $config['serializer']['symfony_serializer']['format'])
+                ->replaceArgument(2, $config['serializer']['symfony_serializer']['context']);
             $container->setAlias('messenger.default_serializer', $config['serializer']['default_serializer']);
         }
 
@@ -248,9 +155,8 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             $transportDefinition = (new Definition(TransportInterface::class))
                 ->setFactory([new Reference('messenger.transport_factory'), 'createTransport'])
                 ->setArguments([$transport['dsn'], $transport['options'] + ['transport_name' => $name], new Reference($serializerId)])
-                ->addTag('messenger.receiver', ['alias' => $name])
-            ;
-            $container->setDefinition($transportId = 'messenger.transport.'.$name, $transportDefinition);
+                ->addTag('messenger.receiver', ['alias' => $name]);
+            $container->setDefinition($transportId = 'messenger.transport.' . $name, $transportDefinition);
             $senderAliases[$name] = $transportId;
 
             if (null !== $transport['retry_strategy']['service']) {
@@ -298,16 +204,14 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
         $sendersServiceLocator = ServiceLocatorTagPass::register($container, $senderReferences);
 
         $container->getDefinition('messenger.senders_locator')
-                  ->replaceArgument(0, $messageToSendersMapping)
-                  ->replaceArgument(1, $sendersServiceLocator)
-        ;
+            ->replaceArgument(0, $messageToSendersMapping)
+            ->replaceArgument(1, $sendersServiceLocator);
 
         $container->getDefinition('messenger.retry.send_failed_message_for_retry_listener')
-                  ->replaceArgument(0, $sendersServiceLocator)
-        ;
+            ->replaceArgument(0, $sendersServiceLocator);
 
         $container->getDefinition('messenger.retry_strategy_locator')
-                  ->replaceArgument(0, $transportRetryReferences);
+            ->replaceArgument(0, $transportRetryReferences);
 
         if ($config['failure_transport']) {
             if (!isset($senderReferences[$config['failure_transport']])) {
@@ -315,13 +219,13 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             }
 
             $container->getDefinition('messenger.failure.send_failed_message_to_failure_transport_listener')
-                      ->replaceArgument(0, $senderReferences[$config['failure_transport']]);
+                ->replaceArgument(0, $senderReferences[$config['failure_transport']]);
             $container->getDefinition('console.command.messenger_failed_messages_retry')
-                      ->replaceArgument(0, $config['failure_transport']);
+                ->replaceArgument(0, $config['failure_transport']);
             $container->getDefinition('console.command.messenger_failed_messages_show')
-                      ->replaceArgument(0, $config['failure_transport']);
+                ->replaceArgument(0, $config['failure_transport']);
             $container->getDefinition('console.command.messenger_failed_messages_remove')
-                      ->replaceArgument(0, $config['failure_transport']);
+                ->replaceArgument(0, $config['failure_transport']);
         } else {
             $container->removeDefinition('messenger.failure.send_failed_message_to_failure_transport_listener');
             $container->removeDefinition('console.command.messenger_failed_messages_retry');
@@ -351,7 +255,6 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             throw new InvalidArgumentException(sprintf('Invalid argument name "%s" for service "%s": the first character must be a letter.', $name, $id));
         }
 
-        return $container->setAlias($type.' $'.$name, $id);
+        return $container->setAlias($type . ' $' . $name, $id);
     }
-
 }
