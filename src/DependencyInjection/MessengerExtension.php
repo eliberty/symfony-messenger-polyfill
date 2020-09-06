@@ -61,104 +61,7 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
 
         $frameworkConfigs = $container->getExtensionConfig('framework');
         $this->registerMessengerExtension($config, $container, $this->validationConfig);
-    }
-
-    private function OldregisterMessengerConfiguration(array $config, ContainerBuilder $container): void
-    {
-        if (empty($config['transports'])) {
-            $container->removeDefinition('messenger.transport.symfony_serializer');
-            $container->removeDefinition('messenger.transport.amqp.factory');
-        } else {
-            if ($config['serializer']['enabled'] && ('messenger.transport.symfony_serializer' === $config['serializer']['id'] || null === $config['serializer']['id'])) {
-                $container->getDefinition('messenger.transport.symfony_serializer')
-                    ->replaceArgument(1, $config['serializer']['format'])
-                    ->replaceArgument(2, $config['serializer']['context']);
-                $container->setAlias('messenger.transport.serializer', 'messenger.transport.symfony_serializer');
-            } elseif (null !== $config['serializer']['id']) {
-                $container->setAlias('messenger.transport.serializer', $config['serializer']['id']);
-            } else {
-                $container->removeDefinition('messenger.transport.amqp.factory');
-            }
-        }
-
-        if (null === $config['default_bus'] && 1 === \count($config['buses'])) {
-            $config['default_bus'] = \key($config['buses']);
-        }
-
-        $defaultMiddleware = [
-            'before' => [],
-            'after' => [['id' => 'send_message'], ['id' => 'handle_message']],
-        ];
-        foreach ($config['buses'] as $busId => $bus) {
-            $middleware = $bus['middleware'];
-
-            if ($bus['default_middleware']) {
-                if ('allow_no_handlers' === $bus['default_middleware']) {
-                    $defaultMiddleware['after'][1]['arguments'] = [true];
-                } else {
-                    unset($defaultMiddleware['after'][1]['arguments']);
-                }
-                $middleware = \array_merge($defaultMiddleware['before'], $middleware, $defaultMiddleware['after']);
-            }
-
-            foreach ($middleware as $middlewareItem) {
-                if (!($config['validation']['enabled'] ?? false) && \in_array($middlewareItem['id'], ['validation', 'messenger.middleware.validation'], true)) {
-                    throw new \LogicException('The Validation middleware is only available when the Validator component is installed and enabled. Try running "composer require symfony/validator".');
-                }
-            }
-
-            if ($container->getParameter('kernel.debug') && \class_exists(Stopwatch::class)) {
-                \array_unshift($middleware, ['id' => 'traceable', 'arguments' => [$busId]]);
-            }
-
-            $container->setParameter($busId . '.middleware', $middleware);
-            $container->register($busId, MessageBus::class)->addArgument([])->addTag('messenger.bus');
-
-            if ($busId === $config['default_bus']) {
-                $container->setAlias('message_bus', $busId)->setPublic(true);
-                $container->setAlias(MessageBusInterface::class, $busId);
-            } else {
-                $this->registerAliasForArgument($container, $busId, MessageBusInterface::class);
-            }
-        }
-
-        $senderAliases = [];
-        foreach ($config['transports'] as $name => $transport) {
-            if (0 === \strpos($transport['dsn'], 'amqp://') && !$container->hasDefinition('messenger.transport.amqp.factory')) {
-                throw new \LogicException('The default AMQP transport is not available. Make sure you have installed and enabled the Serializer component. Try enabling it or running "composer require symfony/serializer-pack".');
-            }
-
-            $transportDefinition = (new Definition(TransportInterface::class))
-                ->setFactory([new Reference('messenger.transport_factory'), 'createTransport'])
-                ->setArguments([$transport['dsn'], $transport['options']])
-                ->addTag('messenger.receiver', ['alias' => $name]);
-            $container->setDefinition($transportId = 'messenger.transport.' . $name, $transportDefinition);
-            $senderAliases[$name] = $transportId;
-        }
-
-        $messageToSendersMapping = [];
-        $messagesToSendAndHandle = [];
-        foreach ($config['routing'] as $message => $messageConfiguration) {
-            if ('*' !== $message && !\class_exists($message) && !\interface_exists($message, false)) {
-                throw new \LogicException(\sprintf('Invalid Messenger routing configuration: class or interface "%s" not found.', $message));
-            }
-            $senders = [];
-            foreach ($messageConfiguration['senders'] as $sender) {
-                $senders[$sender] = new Reference($senderAliases[$sender] ?? $sender);
-            }
-
-            $sendersId = 'messenger.senders.' . $message;
-            $container->register($sendersId, RewindableGenerator::class)
-                ->setFactory('current')
-                ->addArgument([new IteratorArgument($senders)]);
-            $messageToSendersMapping[$message] = new Reference($sendersId);
-
-            $messagesToSendAndHandle[$message] = $messageConfiguration['send_and_handle'];
-        }
-
-        $container->getDefinition('messenger.senders_locator')
-            ->replaceArgument(0, $messageToSendersMapping)
-            ->replaceArgument(1, $messagesToSendAndHandle);
+        $this->loadMessengerServices($container);
     }
 
     private function registerMessengerExtension(array $config, ContainerBuilder $container, $validationConfig): void
@@ -328,6 +231,32 @@ final class MessengerExtension extends ConfigurableExtension implements PrependE
             $container->removeDefinition('console.command.messenger_failed_messages_show');
             $container->removeDefinition('console.command.messenger_failed_messages_remove');
         }
+    }
+
+    private function loadMessengerServices(ContainerBuilder $container) : void
+    {
+
+        if (! class_exists(DoctrineClearEntityManagerWorkerSubscriber::class)) {
+            $container->removeDefinition('doctrine.orm.messenger.event_subscriber.doctrine_clear_entity_manager');
+        }
+
+        // available in Symfony 5.1 and higher
+        if (! class_exists(MessengerTransportDoctrineSchemaSubscriber::class)) {
+            $container->removeDefinition('doctrine.orm.messenger.doctrine_schema_subscriber');
+        }
+
+        $transportFactoryDefinition = $container->getDefinition('messenger.transport.doctrine.factory');
+        if (! class_exists(DoctrineTransportFactory::class)) {
+            // If symfony/messenger < 5.1
+            if (! class_exists(\Symfony\Component\Messenger\Transport\Doctrine\DoctrineTransportFactory::class)) {
+                // Dont add the tag
+                return;
+            }
+
+            $transportFactoryDefinition->setClass(\Symfony\Component\Messenger\Transport\Doctrine\DoctrineTransportFactory::class);
+        }
+
+        $transportFactoryDefinition->addTag('messenger.transport_factory');
     }
 
     public function getAlias(): string
