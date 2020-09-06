@@ -10,6 +10,7 @@
         <service id="console.command.messenger_consume_messages" class="Symfony\Component\Messenger\Command\ConsumeMessagesCommand">
             <argument /> <!-- Message bus locator -->
             <argument type="service" id="messenger.receiver_locator" />
+            <argument type="service" id="event_dispatcher" />
             <argument type="service" id="logger" on-invalid="null" />
             <argument type="collection" /> <!-- Receiver names -->
             <argument type="collection" /> <!-- Message bus names -->
