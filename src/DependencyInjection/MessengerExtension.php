@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lendable\Polyfill\Symfony\MessengerBundle\DependencyInjection;
 
+use \LogicException;
 use Symfony\Component\Console\Application;
 use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
 use Symfony\Component\DependencyInjection\Argument\RewindableGenerator;
